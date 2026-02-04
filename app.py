@@ -57,6 +57,42 @@ if selected_model_name != "尚無模型 (No Models)" and selected_model_name != 
     except Exception as e:
         st.sidebar.error(f"載入失敗: {e}")
 
+    except Exception as e:
+        st.sidebar.error(f"載入失敗: {e}")
+
+# --- Cloud Backup Section ---
+st.sidebar.markdown("---")
+st.sidebar.header("雲端備份 (Google Drive)")
+
+from src import drive_manager
+
+col_c1, col_c2 = st.sidebar.columns(2)
+with col_c1:
+    if st.button("☁️ 備份模型"):
+        if st.session_state.current_model_name:
+            # Find path
+            local_path = os.path.join(model_engine.MODEL_DIR, st.session_state.current_model_name)
+            if os.path.exists(local_path):
+                with st.spinner("上傳中..."):
+                    ok, msg = drive_manager.drive.upload_file(local_path)
+                    if ok: st.sidebar.success("上傳成功!")
+                    else: st.sidebar.error(f"失敗: {msg}")
+            else:
+                st.sidebar.error("找不到檔案")
+        else:
+            st.sidebar.warning("請先載入模型")
+
+with col_c2:
+    if st.button("📥 下載最新"):
+        with st.spinner("下載中..."):
+            ok, name = drive_manager.drive.download_latest_model(model_engine.MODEL_DIR)
+            if ok:
+                st.sidebar.success(f"已下載: {name}")
+                # Refresh list (hacky way: set session state to force rerun or just let user reload)
+                st.rerun() 
+            else:
+                st.sidebar.error(f"失敗: {name}")
+
 st.sidebar.markdown("---")
 st.sidebar.header("選擇工作流程 (Workflow)")
 workflow = st.sidebar.selectbox(
