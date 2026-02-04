@@ -60,38 +60,43 @@ if selected_model_name != "尚無模型 (No Models)" and selected_model_name != 
     except Exception as e:
         st.sidebar.error(f"載入失敗: {e}")
 
-# --- Cloud Backup Section ---
+    except Exception as e:
+        st.sidebar.error(f"載入失敗: {e}")
+
+# --- Model Import/Export (Manual) ---
 st.sidebar.markdown("---")
-st.sidebar.header("雲端備份 (Google Drive)")
+st.sidebar.header("模型存取 (Import/Export)")
 
-from src import drive_manager
+# 1. Download Current Model
+if st.session_state.current_model_name:
+    local_path = os.path.join(model_engine.MODEL_DIR, st.session_state.current_model_name)
+    if os.path.exists(local_path):
+        with open(local_path, "rb") as f:
+            st.sidebar.download_button(
+                label="📥 下載此模型 (.joblib)",
+                data=f,
+                file_name=st.session_state.current_model_name,
+                mime="application/octet-stream"
+            )
 
-col_c1, col_c2 = st.sidebar.columns(2)
-with col_c1:
-    if st.button("☁️ 備份模型"):
-        if st.session_state.current_model_name:
-            # Find path
-            local_path = os.path.join(model_engine.MODEL_DIR, st.session_state.current_model_name)
-            if os.path.exists(local_path):
-                with st.spinner("上傳中..."):
-                    ok, msg = drive_manager.drive.upload_file(local_path)
-                    if ok: st.sidebar.success("上傳成功!")
-                    else: st.sidebar.error(f"失敗: {msg}")
-            else:
-                st.sidebar.error("找不到檔案")
-        else:
-            st.sidebar.warning("請先載入模型")
-
-with col_c2:
-    if st.button("📥 下載最新"):
-        with st.spinner("下載中..."):
-            ok, name = drive_manager.drive.download_latest_model(model_engine.MODEL_DIR)
-            if ok:
-                st.sidebar.success(f"已下載: {name}")
-                # Refresh list (hacky way: set session state to force rerun or just let user reload)
-                st.rerun() 
-            else:
-                st.sidebar.error(f"失敗: {name}")
+# 2. Upload External Model
+uploaded_model = st.sidebar.file_uploader("📤 上傳舊模型 (Restore)", type=["joblib"], key="model_restore")
+if uploaded_model:
+    # Save to models directory
+    restore_path = os.path.join(model_engine.MODEL_DIR, uploaded_model.name)
+    with open(restore_path, "wb") as f:
+        f.write(uploaded_model.getbuffer())
+    
+    st.sidebar.success(f"已還原: {uploaded_model.name}")
+    
+    # Reload functionality
+    if st.sidebar.button("載入此模型 (Load Uploaded)"):
+        try:
+            st.session_state.current_model = st.session_state.model_engine.load_model(restore_path)
+            st.session_state.current_model_name = uploaded_model.name
+            st.rerun()
+        except:
+             st.sidebar.error("載入失敗，檔案可能損毀")
 
 st.sidebar.markdown("---")
 st.sidebar.header("選擇工作流程 (Workflow)")
