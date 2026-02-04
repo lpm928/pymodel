@@ -7,6 +7,7 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 # Config
 FOLDER_NAME = "Antigravity_Models"
+PARENT_FOLDER_ID = "1ql4gHoT4fS0B8Mh5WzSDsDGFcS2f84-i" # User provided shared folder
 SCOPES = ['https://www.googleapis.com/auth/drive']
 KEY_FILE = "google_key.json"
 
@@ -34,36 +35,17 @@ class DriveManager:
             return None
         return None
 
-    def _get_or_create_folder_id(self):
-        if not self.service: return None
-        
-        try:
-            query = f"name='{FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-            results = self.service.files().list(q=query, fields='files(id, name)').execute()
-            items = results.get('files', [])
-            
-            if not items:
-                # Create
-                metadata = {
-                    'name': FOLDER_NAME,
-                    'mimeType': 'application/vnd.google-apps.folder'
-                }
-                file = self.service.files().create(body=metadata, fields='id').execute()
-                print(f"Created folder {FOLDER_NAME}")
-                return file.get('id')
-            else:
-                return items[0]['id']
-        except Exception as e:
-            print(f"Folder Error: {e}")
-            return None
+    def _get_target_folder_id(self):
+        # Simply return the shared folder ID
+        return PARENT_FOLDER_ID
 
     def upload_file(self, local_path):
         """Upload a file to the Antigravity_Models folder."""
         if not self.service: return False, "尚未設定 Google Credentials"
         
         try:
-            folder_id = self._get_or_create_folder_id()
-            if not folder_id: return False, "無法建立遠端資料夾"
+            folder_id = self._get_target_folder_id()
+            if not folder_id: return False, "無法取得目標資料夾 ID"
             
             name = os.path.basename(local_path)
             
@@ -83,7 +65,7 @@ class DriveManager:
         """List models in the folder."""
         if not self.service: return []
         try:
-            folder_id = self._get_or_create_folder_id()
+            folder_id = self._get_target_folder_id()
             query = f"'{folder_id}' in parents and trashed=false"
             results = self.service.files().list(q=query, orderBy='createdTime desc', fields='files(id, name, createdTime)').execute()
             return results.get('files', [])
