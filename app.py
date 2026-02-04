@@ -10,6 +10,48 @@ from src import data_manager, cleaner, model_engine, visualizer
 
 st.set_page_config(page_title="Antigravity 數據處理模組", layout="wide")
 
+# --- Auth Check ---
+def check_password():
+    """Returns `True` if the user had the correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == st.secrets["app_password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    # 1. Check if configured
+    if "app_password" not in st.secrets:
+        # No password set -> Open Access (or Warning)
+        # For security, let's warn but allow, or block?
+        # Let's just return True if not configured to avoid breaking local runs,
+        # BUT warn the user to set it.
+        st.sidebar.warning("⚠️ 未設定密碼 (app_password)。網站目前公開。")
+        return True
+
+    # 2. Check session state
+    if "password_correct" not in st.session_state:
+        # First run, show input
+        st.text_input(
+            "請輸入系統密碼 (Password)", type="password", on_change=password_entered, key="password"
+        )
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password incorrect, show input again
+        st.text_input(
+            "請輸入系統密碼 (Password)", type="password", on_change=password_entered, key="password"
+        )
+        st.error("😕 密碼錯誤")
+        return False
+    else:
+        # Password correct
+        return True
+
+if not check_password():
+    st.stop()
+
 # --- Global Definitions ---
 TYPE_MAPPING = {
     "不使用 (Unused)": "Unused",
