@@ -528,10 +528,13 @@ with tab4:
                             engine = st.session_state.model_engine
                             current_model = st.session_state.current_model
                             
-                            # Retrain
-                            # Determine type - if Lookalike (IF), we pass model_type="lookalike"
-                            # We can also check workflow variable
-                            model_type = "lookalike" if isinstance(current_model, model_engine.IsolationForest) else "standard"
+                            # Determine type
+                            if "PU Learning" in workflow:
+                                model_type = "pu_learning"
+                            elif isinstance(current_model, model_engine.IsolationForest):
+                                model_type = "lookalike"
+                            else:
+                                model_type = "standard"
                             
                             new_model, metrics = engine.update_model(current_model, df_feedback_clean, target_col, id_col, model_type)
                             st.session_state.current_model = new_model
@@ -551,6 +554,8 @@ with tab4:
                             st.info(f"優化後模型已儲存: {name}")
                             st.balloons()
                             
+                        except NotImplementedError:
+                            st.warning("⚠️ PU Learning 屬於高階模型，建議您將新的購買名單合併至『正向名單 (File A)』後，回到第一頁重新上傳並重新訓練，以獲得最佳效果。")
                         except Exception as e:
                             st.error(f"優化失敗: {e}")
                             st.exception(e)
