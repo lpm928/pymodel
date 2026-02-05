@@ -3,8 +3,14 @@ import numpy as np
 import joblib
 import os
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, RandomForestRegressor, GradientBoostingRegressor, IsolationForest
+from sklearn.cluster import KMeans
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, mean_squared_error, r2_score, silhouette_score
 from datetime import datetime
+try:
+    from src import pu_learning
+except ImportError:
+    import pu_learning # Local fallback
 
 MODEL_DIR = "d:/AI/Antigravity/SKB/models"
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -125,8 +131,42 @@ class ModelEngine:
         # Return labels so we can append to DF immediately
         return model, metrics, labels
 
+    def train_pu_learning(self, pos_df, unlabeled_df, feature_weights=None, id_col=None):
+        """
+        Train PU Model (Workflow 4) using src/pu_learning.py
+        """
+        # We need to make sure we don't pass ID columns to the training logic
+        # pu_learning.train_pu_model handles dropping, but let's be safe
+        model, metrics, pipe = pu_learning.train_pu_model(pos_df, unlabeled_df, feature_weights)
+        return model, metrics
+
     def predict(self, model, df, id_col=None):
         """Generic predict."""
+        # For PU Learning (CalibratedClassifierCV), the input to predict must be the raw DF 
+        # because the internal pipeline handles preprocessing (ColumnTransformer).
+        # Standard models (RF/GBM) expect pre-processed X from _prepare_data.
+        
+        # Check model type
+        is_pu = isinstance(model, (pu_learning.CalibratedClassifierCV, pu_learning.Pipeline)) or \
+                (hasattr(model, 'estimator') and hasattr(model.estimator, 'steps') and 'weighter' in model.estimator.named_steps)
+
+        if is_pu:
+             # PU Model expects DataFrame with columns matching training time
+             # We should still probably drop ID if it's not part of features?
+             # But pipeline usually filters logic. Let's pass DF but maybe drop ID if we know it.
+             # Actually pu_learning logic selects features using exclusion list, so passing raw DF including ID is 'okay' 
+             # IF the exclusion list covered it. But let's be safe and try to drop ID if provided.
+             df_input = df.copy()
+             if id_col and id_col in df_input.columns:
+                 df_input.drop(columns=[id_col], inplace=True)
+             
+             probs = model.predict_proba(df_input)[:, 1]
+             # Decile logic or threshold?
+             # Return probs as score. Preds > 0.5?
+             preds = (probs > 0.5).astype(int)
+             return preds, probs
+
+        # Standard Logic
         X, _ = self._prepare_data(df, target_col=None, id_col=id_col)
         
         # Check if model has predict_proba (Classifier)
@@ -136,17 +176,7 @@ class ModelEngine:
             return preds, probs
         elif isinstance(model, IsolationForest):
             # Lookalike Logic
-            # decision_function: average anomaly score of X of the base classifiers.
-            # Higher is better (more normal/similar to training data).
-            # Output range is roughly -0.5 to 0.5 depending on implementation.
             raw_scores = model.decision_function(X)
-            
-            # Normalize to 0-1 probability-like score
-            # We use MinMaxScaler logic but fitted on these batches. 
-            # Ideally we should store min/max from training, but IsolationForest boundaries are dynamic.
-            # A sigmoid or simple min-max on the batch is a practical approximation for ranking.
-            
-            # Simple MinMax for this batch to rank them:
             min_s = raw_scores.min()
             max_s = raw_scores.max()
             if max_s - min_s == 0:
@@ -154,8 +184,6 @@ class ModelEngine:
             else:
                 probs = (raw_scores - min_s) / (max_s - min_s)
             
-            # Preds: 1 if positive score (inlier), -1 if negative (outlier)
-            # We map -1 to 0 (Low Potential) and 1 to 1 (High Potential)
             orig_preds = model.predict(X)
             preds = np.where(orig_preds == 1, 1, 0)
             
@@ -165,32 +193,28 @@ class ModelEngine:
             preds = model.predict(X)
             return preds, None
 
-    def update_model(self, current_model, df_new, target_col=None, id_col=None, model_type="lookalike"):
+    def update_model(self, current_model, df_new, target_col=None, id_col=None, model_type="standard"):
         """
         Feedback Loop (Mode C).
-        Refit model with new data (Incremental not fully supported by RF/IF, so we combine or retrain).
-        For simplicity in this MVP: We assume 'df_new' is the *cumulative* dataset or we just train on new batch?
-        Ideally: Users upload 'Actual Results' of previous predictions.
-        
-        Scenario:
-        1. Lookalike: User uploads more "Successful" customers. -> Train new IF on (Old + New). 
-           (But we don't have Old here easily unless stored. For MVP, we assume User uploads NEW combined list or just refits on new strong signals).
-           Let's assume: User uploads "Actual Purchasers from Prediction List". We retrain a model on this "Confirmed High Value" group.
-           
-        2. Classification: User uploads (Features + Actual Target). Refit classifier.
         """
-        
-        # For this phase, we'll treat "Update" as "Training a new version v1.1" using the provided feedback data.
-        # If user wants to merge with old data, they should ideally handle data merging outside or we provide a merge tool.
-        # But commonly, "Retraining on latest ground truth" is a good step.
-        
         if isinstance(current_model, IsolationForest) or model_type == "lookalike":
-            # Train new Lookalike model on this new positive feedback data
             return self.train_lookalike(df_new, id_col)
             
+        elif model_type == "pu_learning":
+             # For PU, df_new usually means "New Positives" (Confirmed Purchases).
+             # But we also need Unlabeled data to retrain PU!
+             # This is tricky without persisting the original Unlabeled set.
+             # MVP: Assume df_new contains BOTH Positives and some Unlabeled? 
+             # OR: Raise error that PU requires full re-training in Tab 1?
+             # Let's assume user uploads a MERGED file of (Old Positives + New Positives).
+             # And we need Unlabeled data... 
+             # Hack: We can't easily update PU without Unlabeled.
+             # Let's Skip PU update in this simple loop or request B-set.
+             # Better: Allow User to upload "New Positives", and we mix it with a synthetic B set?
+             # For now, return error or handle gracefully.
+             raise NotImplementedError("PU Learning update requires both Positive and Unlabeled data. Please retrain in Tab 2.")
+
         elif target_col:
-            # Train new Classification/Regression model
-            # Detect type by model
             if isinstance(current_model, (RandomForestClassifier, GradientBoostingClassifier)):
                  return self.train_classification(df_new, target_col, id_col)
             elif isinstance(current_model, (RandomForestRegressor, GradientBoostingRegressor)):
@@ -214,7 +238,5 @@ class ModelEngine:
             return []
         
         files = [f for f in os.listdir(MODEL_DIR) if f.endswith('.joblib')]
-        # Sort by creation time (or filename timestamp if strictly followed, creation time is safer if user renames)
-        # But filename sort is good enough for vYYYYMMDD...
         files.sort(reverse=True)
         return files

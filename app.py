@@ -150,13 +150,20 @@ workflow = st.sidebar.selectbox(
     [
         "1. 🎯 下單機率預測 (Purchase Prediction)",
         "2. 👥 客群分群分析 (Segmentation)",
-        "3. 💰 消費金額預測 (Value Prediction)"
+        "3. 💰 消費金額預測 (Value Prediction)",
+        "4. 🕵️‍♂️ 潛在客戶挖掘 (PU Learning)"
     ]
 )
 
 # Initialize Session State
 if 'df_raw' not in st.session_state:
     st.session_state.df_raw = None
+# PU Learning needs two dataframes
+if 'df_pos' not in st.session_state:
+    st.session_state.df_pos = None
+if 'df_unlabeled' not in st.session_state:
+    st.session_state.df_unlabeled = None
+
 if 'df_processed' not in st.session_state:
     st.session_state.df_processed = None
 if 'metadata' not in st.session_state:
@@ -179,14 +186,36 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.header("資料匯入與欄位定義")
     
-    # Upload Section
-    uploaded_file = st.file_uploader("上傳訓練資料 (CSV)", type=["csv"], key="train_uploader")
-    if uploaded_file is not None:
-        try:
-            st.session_state.df_raw = data_manager.load_csv_robust(uploaded_file)
-            st.success(f"成功載入 {uploaded_file.name}，資料形狀: {st.session_state.df_raw.shape}")
-        except Exception as e:
-            st.error(f"檔案讀取失敗: {e}")
+    if "PU Learning" in workflow:
+        st.info("🕵️‍♂️ PU Learning 需要兩份資料：已被標記的正向名單 (File A) 與 未標記名單 (File B)")
+        col_u1, col_u2 = st.columns(2)
+        
+        with col_u1:
+            up_pos = st.file_uploader("上傳正向名單 (File A - 已購客)", type=["csv"], key="pu_pos")
+            if up_pos:
+                st.session_state.df_pos = data_manager.load_csv_robust(up_pos)
+                st.success(f"已載入正向樣本: {len(st.session_state.df_pos)} 筆")
+                
+        with col_u2:
+            up_un = st.file_uploader("上傳未標記名單 (File B - 潛在客)", type=["csv"], key="pu_un")
+            if up_un:
+                st.session_state.df_unlabeled = data_manager.load_csv_robust(up_un)
+                st.success(f"已載入未標記樣本: {len(st.session_state.df_unlabeled)} 筆")
+        
+        # Combine for metadata definition (taking mostly from B as it's the target space)
+        # But we need to make sure columns match.
+        if st.session_state.df_pos is not None and st.session_state.df_unlabeled is not None:
+             # Concatenate for metadata view
+             st.session_state.df_raw = pd.concat([st.session_state.df_pos, st.session_state.df_unlabeled], ignore_index=True)
+    else:
+        # Standard Single File Upload
+        uploaded_file = st.file_uploader("上傳訓練資料 (CSV)", type=["csv"], key="train_uploader")
+        if uploaded_file is not None:
+            try:
+                st.session_state.df_raw = data_manager.load_csv_robust(uploaded_file)
+                st.success(f"成功載入 {uploaded_file.name}，資料形狀: {st.session_state.df_raw.shape}")
+            except Exception as e:
+                st.error(f"檔案讀取失敗: {e}")
 
     # Metadata Mapping Section
     if st.session_state.df_raw is not None:
@@ -326,6 +355,77 @@ with tab2:
                     valid_cols = [c for c in df_viz.columns if pd.api.types.is_numeric_dtype(df_viz[c]) and c not in ['Cluster', 'Batch_ID']]
                     
                     visualizer.plot_clusters_2d(df_viz, 'Cluster', valid_cols)
+
+        elif "PU Learning" in workflow:
+            st.write("🕵️‍♂️ 潛在客戶挖掘 (Positive-Unlabeled Learning)")
+            
+            if st.session_state.df_pos is None or st.session_state.df_unlabeled is None:
+                 st.error("請先在第一頁上傳 File A (正向) 與 File B (未標記)！")
+            else:
+                 # Manual Hints
+                 st.info("此模型會自動區分正向與未標記資料特徵。您也可以手動加強某些關鍵特徵的權重。")
+                 
+                 # Feature Weight Config
+                 with st.expander("⚙️ 進階設定：特徵加權 (Feature Weights)"):
+                     st.write("設定權重 (預設 1.0)。設為 0 代表該特徵不參與加權調整。")
+                     feature_cols = [c for c in st.session_state.df_unlabeled.columns if c not in [id_col, 'Batch_ID']]
+                     
+                     weights = {}
+                     cols = st.columns(3)
+                     for i, col in enumerate(feature_cols):
+                         with cols[i % 3]:
+                             # Default 1.0
+                             val = st.number_input(f"{col}", 0.0, 5.0, 1.0, 0.1, key=f"w_{col}")
+                             if val != 1.0:
+                                 weights[col] = val
+                 
+                 if st.button("開始挖掘 (Train PU Model)"):
+                     with st.spinner("正在進行 PU Learning 訓練..."):
+                         engine = st.session_state.model_engine
+                         
+                         # Need to pass separated DF A and B for cleaning?
+                         # Usually we clean merged DF then split.
+                         # Our Tab 1 merged them into df_raw and ran cleaner -> df_processed.
+                         # Now we need to split df_processed back into Pos and Unlabeled based on index or source?
+                         # Tricky.
+                         # Easier approach: Clean df_pos and df_unlabeled SEPARATELY using same metadata options?
+                         # Or just split df_processed.
+                         
+                         # Since df_raw was concat(pos, unlabeled), the first len(pos) rows are pos.
+                         n_pos = len(st.session_state.df_pos)
+                         df_proc = st.session_state.df_processed
+                         
+                         df_train_pos = df_proc.iloc[:n_pos].copy()
+                         df_train_un = df_proc.iloc[n_pos:].copy()
+                         
+                         # Train
+                         model, metrics = engine.train_pu_learning(df_train_pos, df_train_un, weights, id_col)
+                         st.session_state.current_model = model
+                         
+                         st.success(f"訓練完成！AUC: {metrics['auc']:.4f}")
+                         st.write(f"使用正樣本數: {metrics['pos_samples']}, 負樣本數(採樣): {metrics['neg_samples_used']}")
+                         
+                         # Feature Importance (if pipeline)
+                         # Extract from pipeline step 'clf' coefficients
+                         # PU module handles this internally? 
+                         # Let's try to extract coefficient info if available
+                         try:
+                             # Access inner pipeline
+                             # model is CalibratedCV in app?
+                             # engine returns (model, metrics)
+                             # Wait, engine returns (calibrated_clf, metrics)
+                             # We need the base estimator to get coefs.
+                             # CalibratedClassifierCV -> calibrated_classifiers_[0].estimator (if prefit) or base_estimator
+                             
+                             # Actually engine.train_pu_learning returns (calibrated_clf, metrics)
+                             # Getting feature importance from calibrated SVM/Logistic is hard visually.
+                             pass
+                         except:
+                             pass
+                         
+                         # Save
+                         path, name = engine.save_model(model, "pu_model")
+                         st.info(f"模型已儲存: {name}")
 
         elif "Value Prediction" in workflow:
             if not target_col:
