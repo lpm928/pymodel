@@ -23,12 +23,15 @@ def check_password():
             st.session_state["password_correct"] = False
 
     # 1. Check if configured
-    if "app_password" not in st.secrets:
-        # No password set -> Open Access (or Warning)
-        # For security, let's warn but allow, or block?
-        # Let's just return True if not configured to avoid breaking local runs,
-        # BUT warn the user to set it.
-        st.sidebar.warning("⚠️ 未設定密碼 (app_password)。網站目前公開。")
+    try:
+        if "app_password" not in st.secrets:
+            # No password set -> Open Access (or Warning)
+            st.sidebar.warning("⚠️ 未設定密碼 (app_password)。網站目前公開。")
+            return True
+            
+    except Exception:
+        # Local run without secrets.toml
+        # st.sidebar.info("ℹ️ 本地模式 (無 secrets.toml)：略過密碼驗證。")
         return True
 
     # 2. Check session state

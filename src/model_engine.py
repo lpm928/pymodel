@@ -17,21 +17,23 @@ class ModelEngine:
         """Separate features (X) and target (y), dropping ID if present."""
         df_mod = df.copy()
         
-        # Drop non-feature columns
+        # Drop known non-feature columns
         cols_to_drop = ["Batch_ID"]
         if id_col and id_col in df_mod.columns:
             cols_to_drop.append(id_col)
             
-        # Also drop created metadata columns that shouldn't be features if they exist
-        # (This depends on cleaner implementation, usually we assume cleaned df is ready features + target)
-        
-        X = df_mod.drop(columns=[c for c in cols_to_drop if c in df_mod.columns])
+        # Initial drop
+        df_mod = df_mod.drop(columns=[c for c in cols_to_drop if c in df_mod.columns])
         
         y = None
-        if target_col and target_col in X.columns:
-            y = X[target_col]
-            X = X.drop(columns=[target_col])
+        if target_col and target_col in df_mod.columns:
+            y = df_mod[target_col]
+            df_mod = df_mod.drop(columns=[target_col])
             
+        # Critical: Filter only valid feature types (Numeric/Bool)
+        # This removes "Unused" string columns that cleaner.py might have left behind.
+        X = df_mod.select_dtypes(include=[np.number, bool])
+        
         return X, y
 
     def train_lookalike(self, df, id_col=None):
