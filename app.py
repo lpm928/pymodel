@@ -155,6 +155,48 @@ workflow = st.sidebar.selectbox(
     ]
 )
 
+# --- Model Documentation ---
+MODEL_DOCS = {
+    "1. 🎯 下單機率預測 (Purchase Prediction)": {
+        "title": "🎯 下單機率預測 (Binary Classification)",
+        "principle": "使用 **隨機森林 (Random Forest)** 等分類演算法，學習「成功案例」與「失敗案例」的特徵差異，建立一條判斷規則。",
+        "purpose": "預測某個客戶 **「會不會買」** (Yes/No)、會不會流失、是否為變動戶。",
+        "data_req": "**單一 CSV 檔案**。\n- 必須包含客戶特徵 (如年齡、消費頻率)。\n- **必須** 有一欄『預測目標 (Target)』，內容為 0 (否) 或 1 (是)。",
+        "action": "1. 在 Tab 1 上傳資料並將 Target 欄位設定為『Target』。\n2. 在 Tab 2 點擊訓練。\n3. 在 Tab 3 預測新名單。"
+    },
+    "2. 👥 客群分群分析 (Segmentation)": {
+        "title": "👥 客群分群分析 (Clustering - K-Means)",
+        "principle": "非監督式學習。演算法會計算每個客戶在多維特徵空間中的距離，自動將 **「行為相似」** 的人聚在一起。",
+        "purpose": "找出不同類型的客戶畫像 (Persona)。例如：『高消費低頻次群』、『小資活躍群』，以利進行分眾行銷 (Segmentation)。",
+        "data_req": "**單一 CSV 檔案**。\n- 包含客戶特徵即可。\n- **不需要** Target 欄位 (因為是自動分群)。",
+        "action": "1. 在 Tab 1 上傳資料，不需設定 Target。\n2. 在 Tab 2 設定分群數量 (K) 並執行。\n3. 查看分群視覺化結果。"
+    },
+    "3. 💰 消費金額預測 (Value Prediction)": {
+        "title": "💰 消費金額預測 (Regression)",
+        "principle": "使用 **回歸模型 (Regressor)**，學習特徵與「連續數值」之間的數學關係。",
+        "purpose": "預測 **「具體數值」**。例如：下個月會買多少錢 (LTV)、存貨需求量、用電量預測。",
+        "data_req": "**單一 CSV 檔案**。\n- 必須有一欄『預測目標 (Target)』，且內容必須是 **連續數字** (如金額 100, 2500, 300...)。",
+        "action": "1. 在 Tab 1 上傳資料，將金額欄位設為『Target』。\n2. 在 Tab 2 訓練回歸模型。\n3. 系統會顯示預測誤差 (MSE)。"
+    },
+    "4. 🕵️‍♂️ 潛在客戶挖掘 (PU Learning)": {
+        "title": "🕵️‍♂️ 潛在客戶挖掘 (PU Learning)",
+        "principle": "正向不確定學習 (Positive-Unlabeled)。當您只有「已購客名單」，但沒有明確的「拒絕客名單」時使用。系統會將已購客視為正向 (1)，並從茫茫人海中取樣作為背景值 (0)，訓練出能區分「長得像已購客」的模型。",
+        "purpose": "從大量未標記名單中，撈出 **「潛在的高價值客戶 (Lookalike)」** 進行擴大名單投放。",
+        "data_req": "**需要兩份 CSV**。\n- **File A (正向)**：已購買/已成交的客戶名單。\n- **File B (未標記)**：所有會員或行銷名單 (包含潛在客戶)。",
+        "action": "1. 在 Tab 1 分別上傳 File A 與 File B。\n2. 在 Tab 2 可手動調整特徵權重並訓練。\n3. 系統會產出 File B 中每個人的『潛力分數』。"
+    }
+}
+
+# Display Docs in Expander
+st.sidebar.info("👇 第一次使用？請點開閱讀與操作說明")
+with st.sidebar.expander("📖 模型原理與操作指南", expanded=False):
+    doc = MODEL_DOCS[workflow]
+    st.markdown(f"### {doc['title']}")
+    st.markdown(f"#### 💡 原理 (Principle)\n{doc['principle']}")
+    st.markdown(f"#### 🎯 主要用途 (Purpose)\n{doc['purpose']}")
+    st.markdown(f"#### 📂 須提供的資料 (Data)\n{doc['data_req']}")
+    st.markdown(f"#### 🚀 操作說明 (Action)\n{doc['action']}")
+
 # Initialize Session State
 if 'df_raw' not in st.session_state:
     st.session_state.df_raw = None
